@@ -1,0 +1,71 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ca-central-1
+  ECR_FRONTEND_REPOSITORY: blynk-frontend
+  ECR_BACKEND_REPOSITORY: blynk-backend
+  S3_BUCKET: blynk-codepipeline-artifacts
+  FRONTEND_PIPELINE: blynk-frontend-pipeline
+  BACKEND_PIPELINE: blynk-backend-pipeline
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build and push frontend image
+      run: |
+        cd frontend
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }} .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}
+        echo "FRONTEND_IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_ENV
+
+    - name: Build and push backend image
+      run: |
+        cd backend
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }} .
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}
+        echo "BACKEND_IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_ENV
+
+    - name: Create image definitions
+      run: |
+        mkdir -p build
+        echo '[{"name":"blynk-frontend","imageUri":"'$FRONTEND_IMAGE'"}]' > build/frontend-imagedefinitions.json
+        echo '[{"name":"blynk-backend","imageUri":"'$BACKEND_IMAGE'"}]' > build/backend-imagedefinitions.json
+
+    - name: Upload frontend image definitions to S3
+      run: |
+        aws s3 cp build/frontend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/frontend/imagedefinitions.json
+
+    - name: Upload backend image definitions to S3
+      run: |
+        aws s3 cp build/backend-imagedefinitions.json s3://${{ env.S3_BUCKET }}/backend/imagedefinitions.json
+
+    - name: Trigger CodePipeline for frontend
+      run: |
+        aws codepipeline start-pipeline-execution --name ${{ env.FRONTEND_PIPELINE }}
+
+    - name: Trigger CodePipeline for backend
+      run: |
+        aws codepipeline start-pipeline-execution --name ${{ env.BACKEND_PIPELINE }}
