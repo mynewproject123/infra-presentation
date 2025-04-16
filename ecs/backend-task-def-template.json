@@ -1,0 +1,19 @@
+{
+  "family": "blynk-backend-task",
+  "containerDefinitions": [
+    {
+      "name": "blynk-backend",
+      "image": "<BACKEND_IMAGE>",
+      "memory": 512,
+      "cpu": 256,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080
+        }
+      ]
+    }
+  ]
+}
+
